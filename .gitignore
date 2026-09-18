@@ -1,0 +1,13 @@
+node_modules/
+build/
+.env
+.env.local
+.env.production
+*.log
+.DS_Store
+__pycache__/
+*.pyc
+*.pyo
+.aws-sam/
+samconfig.toml
+.amplify/

@@ -1,0 +1,157 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: KrishiMitra AI - Multimodal Farm Advisory System
+
+Globals:
+  Function:
+    Timeout: 60
+    MemorySize: 512
+    Runtime: python3.12
+    Environment:
+      Variables:
+        DYNAMODB_TABLE: !Ref FarmersTable
+        S3_BUCKET: !Ref CropImagesBucket
+        BEDROCK_MODEL_ID: anthropic.claude-3-5-sonnet-20241022-v2:0
+        REGION: !Ref AWS::Region
+
+Resources:
+  # ─── S3 Bucket for Crop Images ───────────────────────────────────────
+  CropImagesBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub krishimitra-crop-images-${AWS::AccountId}
+      CORSConfiguration:
+        CorsRules:
+          - AllowedOrigins: ["*"]
+            AllowedMethods: [GET, PUT, POST]
+            AllowedHeaders: ["*"]
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+
+  # ─── DynamoDB Table ───────────────────────────────────────────────────
+  FarmersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: krishimitra-farmers
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: farmerId
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: farmerId
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+
+  # ─── Main Orchestrator Lambda ─────────────────────────────────────────
+  OrchestratorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: krishimitra-orchestrator
+      CodeUri: ../lambda/orchestrator/
+      Handler: handler.lambda_handler
+      Policies:
+        - AmazonDynamoDBFullAccess
+        - AmazonS3FullAccess
+        - AmazonBedrockFullAccess
+        - AmazonRekognitionFullAccess
+        - AmazonTranscribeFullAccess
+        - AmazonPollyFullAccess
+        - AmazonDynamoDBFullAccess
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /advisory
+            Method: POST
+            RestApiId: !Ref KrishiMitraApi
+
+  # ─── Disease Detection Lambda ─────────────────────────────────────────
+  DiseaseAgentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: krishimitra-disease-agent
+      CodeUri: ../lambda/disease_agent/
+      Handler: handler.lambda_handler
+      Policies:
+        - AmazonRekognitionFullAccess
+        - AmazonBedrockFullAccess
+        - AmazonS3FullAccess
+
+  # ─── Treatment Agent Lambda ───────────────────────────────────────────
+  TreatmentAgentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: krishimitra-treatment-agent
+      CodeUri: ../lambda/treatment_agent/
+      Handler: handler.lambda_handler
+      Policies:
+        - AmazonBedrockFullAccess
+
+  # ─── Market Price Agent Lambda ────────────────────────────────────────
+  MarketAgentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: krishimitra-market-agent
+      CodeUri: ../lambda/market_agent/
+      Handler: handler.lambda_handler
+      Policies:
+        - AmazonBedrockFullAccess
+
+  # ─── Weather Agent Lambda ─────────────────────────────────────────────
+  WeatherAgentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: krishimitra-weather-agent
+      CodeUri: ../lambda/weather_agent/
+      Handler: handler.lambda_handler
+      Policies:
+        - AmazonBedrockFullAccess
+
+  # ─── Voice Processing Lambda (Transcribe + Polly) ────────────────────
+  VoiceProcessorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: krishimitra-voice-processor
+      CodeUri: ../lambda/orchestrator/
+      Handler: voice_handler.lambda_handler
+      Policies:
+        - AmazonTranscribeFullAccess
+        - AmazonPollyFullAccess
+        - AmazonS3FullAccess
+      Events:
+        VoiceApiEvent:
+          Type: Api
+          Properties:
+            Path: /voice
+            Method: POST
+            RestApiId: !Ref KrishiMitraApi
+
+  # ─── API Gateway ──────────────────────────────────────────────────────
+  KrishiMitraApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: krishimitra-api
+      StageName: prod
+      Cors:
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization'"
+        AllowOrigin: "'*'"
+
+Outputs:
+  ApiUrl:
+    Description: KrishiMitra API URL
+    Value: !Sub "https://${KrishiMitraApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
+  S3Bucket:
+    Description: Crop Images Bucket
+    Value: !Ref CropImagesBucket
+  DynamoDBTable:
+    Description: Farmers Table
+    Value: !Ref FarmersTable
